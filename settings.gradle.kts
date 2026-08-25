@@ -1,2 +1,2 @@
-rootProject.name = "102Burp"
+rootProject.name = "BurpCypher"
 
